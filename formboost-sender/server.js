@@ -415,7 +415,7 @@ app.post('/submit', async (req, res) => {
 
 // バッチ送信（リトライ付き）
 app.post('/submit-batch', async (req, res) => {
-  const { targets, sender, dry_run, interval_ms = 3000, webhook_url, max_retry = 1 } = req.body;
+  const { targets, sender, target_messages, dry_run, interval_ms = 3000, webhook_url, max_retry = 1 } = req.body;
   if (!Array.isArray(targets) || !targets.length) return res.json({ success: false, error: 'targets required' });
 
   // 即レスポンス（バックグラウンド処理）
@@ -430,9 +430,14 @@ app.post('/submit-batch', async (req, res) => {
       let result = null;
       const effectiveMode = t.form_url ? 'A' : 'B';
 
+      // per-target custom_message がある場合、sender.messageを上書き
+      const effectiveSender = (target_messages && target_messages[t.id])
+        ? { ...sender, message: target_messages[t.id] }
+        : sender;
+
       // 送信（リトライ付き）
       for (let attempt = 0; attempt <= max_retry; attempt++) {
-        result = await submitForm(t.form_url, sender, {
+        result = await submitForm(t.form_url, effectiveSender, {
           mode: effectiveMode,
           hpUrl: t.hp_url,
           dryRun: dry_run || false,

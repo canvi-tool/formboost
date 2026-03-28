@@ -77,6 +77,12 @@ export async function POST(req: NextRequest) {
     hp_url: t.hp_url || t.site_url || null,
   }))
 
+  // per-target custom_message があればsenderのmessageを上書き
+  const targetMessages: Record<string, string> = {}
+  for (const t of targets) {
+    if (t.custom_message) targetMessages[t.id] = t.custom_message
+  }
+
   // Cloud Runに非同期でバッチ送信を依頼（結果はwebhookで受け取る）
   fetch(`${SENDER_URL}/submit-batch`, {
     method: 'POST',
@@ -84,6 +90,7 @@ export async function POST(req: NextRequest) {
     body: JSON.stringify({
       targets: batchTargets,
       sender,
+      target_messages: targetMessages,
       webhook_url: webhookUrl,
       interval_ms: 3000,
     }),

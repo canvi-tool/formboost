@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { createBrowserClient } from '@/lib/supabase'
 import { authFetch } from '@/lib/auth'
-import type { Campaign, Target, SendStatus } from '@/lib/types'
+import type { Campaign, Target, SendStatus, ServiceProfile } from '@/lib/types'
 
 type CompanyRecord = {
   company: string
@@ -11,6 +11,7 @@ type CompanyRecord = {
   hp_url?: string
   hojin_number?: string
   address?: string
+  custom_message?: string
 }
 
 type AuthState = {
@@ -19,6 +20,18 @@ type AuthState = {
 }
 
 const STORAGE_KEY = 'formboost_sender'
+const SERVICE_PROFILE_KEY = 'formboost_service_profile'
+
+const DEFAULT_SERVICE_PROFILE: ServiceProfile = {
+  service_name: '',
+  service_description: '',
+  target_pain_points: '',
+  value_proposition: '',
+  differentiators: '',
+  case_study: '',
+  desired_cta: 'ご面談のお時間をいただけましたら幸いです',
+  tone: 'formal',
+}
 
 export default function Home() {
   // ── Auth ──
@@ -43,6 +56,15 @@ export default function Home() {
   const [senderEmail, setSenderEmail] = useState('yuji.okabayashi@canvi.co.jp')
   const [senderPhone, setSenderPhone] = useState('03-6271-4900')
   const [template, setTemplate] = useState('')
+
+  // ── AI Message Generation ──
+  const [useAi, setUseAi] = useState(false)
+  const [serviceProfile, setServiceProfile] = useState<ServiceProfile>(DEFAULT_SERVICE_PROFILE)
+  const [aiGenerating, setAiGenerating] = useState(false)
+  const [aiProgress, setAiProgress] = useState({ done: 0, total: 0 })
+  const [aiPreview, setAiPreview] = useState('')
+  const [showServiceForm, setShowServiceForm] = useState(true)
+  const [selectedCompanyIdx, setSelectedCompanyIdx] = useState<number | null>(null)
 
   // ── UI State ──
   const [activeTab, setActiveTab] = useState<'campaigns' | 'import' | 'detail'>('campaigns')
@@ -74,6 +96,14 @@ export default function Home() {
         if (d.template !== undefined) setTemplate(d.template)
       }
     } catch { /* ignore */ }
+    try {
+      const savedProfile = localStorage.getItem(SERVICE_PROFILE_KEY)
+      if (savedProfile) {
+        const p = JSON.parse(savedProfile)
+        setServiceProfile(prev => ({ ...prev, ...p }))
+        if (p.service_name) setUseAi(true)
+      }
+    } catch { /* ignore */ }
   }, [])
 
   useEffect(() => {
@@ -81,6 +111,12 @@ export default function Home() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ senderCompany, senderName, senderEmail, senderPhone, template }))
     } catch { /* ignore */ }
   }, [senderCompany, senderName, senderEmail, senderPhone, template])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SERVICE_PROFILE_KEY, JSON.stringify(serviceProfile))
+    } catch { /* ignore */ }
+  }, [serviceProfile])
 
   // ── Load campaigns ──
   const loadCampaigns = useCallback(async () => {
@@ -169,16 +205,69 @@ export default function Home() {
     reader.readAsText(file, 'UTF-8'); e.target.value = ''
   }
 
+  // ── AI Message Generation ──
+  const generateMessage = async (company: CompanyRecord): Promise<string> => {
+    const res = await authFetch('/api/generate-message', {
+      method: 'POST',
+      body: JSON.stringify({
+        service_profile: serviceProfile,
+        company: { name: company.company, hp_url: company.hp_url, address: company.address },
+        sender: { company: senderCompany, name: senderName, email: senderEmail, phone: senderPhone },
+      }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'AI生成エラー')
+    return data.message
+  }
+
+  const generatePreview = async () => {
+    if (!companyRecords.length || !serviceProfile.service_name) return
+    setAiGenerating(true)
+    try {
+      const target = companyRecords[selectedCompanyIdx ?? 0]
+      const msg = await generateMessage(target)
+      setAiPreview(msg)
+      setCompanyRecords(prev => prev.map((r, i) => i === (selectedCompanyIdx ?? 0) ? { ...r, custom_message: msg } : r))
+    } catch (e) {
+      console.error('AI generate error:', e)
+      setAiPreview('エラー: ' + (e instanceof Error ? e.message : '不明'))
+    }
+    setAiGenerating(false)
+  }
+
+  const generateAll = async () => {
+    if (!companyRecords.length || !serviceProfile.service_name) return
+    setAiGenerating(true)
+    setAiProgress({ done: 0, total: companyRecords.length })
+    const updated = [...companyRecords]
+    for (let i = 0; i < updated.length; i++) {
+      try {
+        const msg = await generateMessage(updated[i])
+        updated[i] = { ...updated[i], custom_message: msg }
+        setAiProgress({ done: i + 1, total: updated.length })
+        setCompanyRecords([...updated])
+      } catch (e) {
+        console.error(`AI generate error for ${updated[i].company}:`, e)
+        updated[i] = { ...updated[i], custom_message: '' }
+      }
+    }
+    setAiGenerating(false)
+  }
+
   // ── Create Campaign ──
   const createCampaign = async () => {
     if (!companyRecords.length || !campaignName) return
     setLoading(true)
     try {
+      const targetsPayload = companyRecords.map(r => ({
+        ...r,
+        custom_message: useAi ? (r.custom_message || '') : '',
+      }))
       const res = await authFetch('/api/campaigns', {
         method: 'POST',
         body: JSON.stringify({
           name: campaignName,
-          targets: companyRecords,
+          targets: targetsPayload,
           sender: { company: senderCompany, name: senderName, email: senderEmail, phone: senderPhone, message: template },
         }),
       })
@@ -187,6 +276,7 @@ export default function Home() {
         await loadCampaigns()
         setCompanyRecords([])
         setCampaignName('')
+        setAiPreview('')
         setActiveTab('campaigns')
       }
     } catch (e) { console.error(e) }
@@ -231,6 +321,7 @@ export default function Home() {
   const withHpUrl = companyRecords.filter(r => r.hp_url && !r.form_url).length
   const searchOnly = companyRecords.length > 0 ? companyRecords.length - withFormUrl - withHpUrl : 0
   const estimatedCost = withFormUrl * 0.56 + withHpUrl * 0.67 + searchOnly * 2.89
+  const aiGenerated = companyRecords.filter(r => r.custom_message).length
 
   const senderFields = [
     { label: '会社名', value: senderCompany, set: setSenderCompany },
@@ -238,6 +329,10 @@ export default function Home() {
     { label: 'メール', value: senderEmail, set: setSenderEmail },
     { label: '電話番号', value: senderPhone, set: setSenderPhone },
   ] as const
+
+  const updateProfile = (key: keyof ServiceProfile, val: string) => {
+    setServiceProfile(prev => ({ ...prev, [key]: val }))
+  }
 
   // ── Auth Screen ──
   if (auth.loading) return <main className="min-h-screen bg-[#0a0a0f] text-white flex items-center justify-center font-mono"><div className="text-gray-500 text-xs">{'Loading...'}</div></main>
@@ -335,7 +430,7 @@ export default function Home() {
         {/* ===== CSV Import ===== */}
         {activeTab === 'import' && (
           <div className="flex h-full">
-            <div className="w-96 border-r border-[#1a1a2e] flex flex-col p-4">
+            <div className="w-[420px] border-r border-[#1a1a2e] flex flex-col p-4 overflow-y-auto">
               <div className="text-xs text-gray-600 mb-3">{'// CSVインポート'}</div>
               <input ref={fileRef} type="file" accept=".csv" onChange={handleCSV} className="hidden" />
               <button onClick={() => fileRef.current?.click()} className="w-full py-3 border border-dashed border-[#1a1a2e] hover:border-[#00ff88] text-gray-500 hover:text-[#00ff88] text-xs mb-4 transition-colors">
@@ -345,7 +440,7 @@ export default function Home() {
               {companyRecords.length > 0 && (
                 <>
                   <div className="text-xs text-white font-bold mb-2">{companyRecords.length}{'社読み込み済'}</div>
-                  <div className="flex gap-2 flex-wrap mb-4">
+                  <div className="flex gap-2 flex-wrap mb-3">
                     {withFormUrl > 0 && <span className="text-xs bg-blue-500/10 text-blue-400 px-2 py-1">{'A: '}{withFormUrl}{'社 ¥'}{(withFormUrl * 0.56).toFixed(0)}</span>}
                     {withHpUrl > 0 && <span className="text-xs bg-cyan-500/10 text-cyan-400 px-2 py-1">{'B: '}{withHpUrl}{'社 ¥'}{(withHpUrl * 0.67).toFixed(0)}</span>}
                     {searchOnly > 0 && <span className="text-xs bg-yellow-500/10 text-yellow-500 px-2 py-1">{'検索: '}{searchOnly}{'社 ¥'}{(searchOnly * 2.89).toFixed(0)}</span>}
@@ -361,30 +456,153 @@ export default function Home() {
                       <input type="text" value={value} onChange={e => (set as (v: string) => void)(e.target.value)} className="flex-1 bg-transparent border border-[#1a1a2e] text-white text-xs p-1.5 outline-none focus:border-[#00ff88]" />
                     </div>
                   ))}
-                  <div className="text-xs text-gray-600 mt-2 mb-1">{'メッセージ'}</div>
-                  <textarea value={template} onChange={e => setTemplate(e.target.value)} className="w-full bg-transparent border border-[#1a1a2e] text-white text-xs p-2 resize-none outline-none h-32 focus:border-[#00ff88] placeholder-gray-700" placeholder="送信メッセージ..." />
 
-                  <button onClick={createCampaign} disabled={loading || !campaignName} className="w-full py-2 mt-4 bg-[#00ff88] text-black font-bold text-xs disabled:opacity-40 hover:bg-[#00cc70]">
-                    {loading ? '作成中...' : `▶ キャンペーン作成 (${companyRecords.length}社)`}
+                  {/* ── AI Toggle ── */}
+                  <div className="flex items-center gap-3 mt-4 mb-3 border-t border-[#1a1a2e] pt-4">
+                    <button
+                      onClick={() => setUseAi(!useAi)}
+                      className={'text-xs px-3 py-1.5 font-bold transition-all ' + (useAi ? 'bg-purple-600 text-white' : 'border border-[#1a1a2e] text-gray-500 hover:text-purple-400 hover:border-purple-400')}
+                    >
+                      {'AI'} {useAi ? 'ON' : 'OFF'}
+                    </button>
+                    <span className="text-xs text-gray-500">{'AIがメッセージを企業ごとに自動生成'}</span>
+                  </div>
+
+                  {/* ── Manual Template (when AI is off) ── */}
+                  {!useAi && (
+                    <>
+                      <div className="text-xs text-gray-600 mb-1">{'メッセージテンプレート'}</div>
+                      <textarea value={template} onChange={e => setTemplate(e.target.value)} className="w-full bg-transparent border border-[#1a1a2e] text-white text-xs p-2 resize-none outline-none h-32 focus:border-[#00ff88] placeholder-gray-700" placeholder="全社共通の送信メッセージ..." />
+                    </>
+                  )}
+
+                  {/* ── AI Service Profile (when AI is on) ── */}
+                  {useAi && (
+                    <div className="border border-purple-500/30 bg-purple-500/5 p-3 mb-3">
+                      <button onClick={() => setShowServiceForm(!showServiceForm)} className="flex items-center justify-between w-full text-xs text-purple-400 font-bold mb-2">
+                        <span>{'// サービス情報（AI生成用）'}</span>
+                        <span>{showServiceForm ? '▲' : '▼'}</span>
+                      </button>
+
+                      {showServiceForm && (
+                        <div className="space-y-2">
+                          {([
+                            { key: 'service_name' as const, label: 'サービス名', placeholder: '例: FormBoost', type: 'input' },
+                            { key: 'service_description' as const, label: 'サービス概要', placeholder: '何をするサービスか（1-2文で）', type: 'textarea' },
+                            { key: 'target_pain_points' as const, label: '顧客の課題', placeholder: 'ターゲット企業が抱える課題・ペイン', type: 'textarea' },
+                            { key: 'value_proposition' as const, label: '提供価値', placeholder: 'このサービスで得られる具体的な成果', type: 'textarea' },
+                            { key: 'differentiators' as const, label: '差別化ポイント', placeholder: '競合との違い・独自の強み', type: 'textarea' },
+                            { key: 'case_study' as const, label: '実績・数値', placeholder: '例: 導入企業200社、問い合わせ3倍増', type: 'input' },
+                            { key: 'desired_cta' as const, label: 'CTA', placeholder: 'ご面談のお時間をいただけましたら幸いです', type: 'input' },
+                          ] as const).map(({ key, label, placeholder, type }) => (
+                            <div key={key}>
+                              <div className="text-xs text-gray-500 mb-1">{label}</div>
+                              {type === 'input' ? (
+                                <input
+                                  type="text"
+                                  value={serviceProfile[key]}
+                                  onChange={e => updateProfile(key, e.target.value)}
+                                  placeholder={placeholder}
+                                  className="w-full bg-transparent border border-purple-500/20 text-white text-xs p-1.5 outline-none focus:border-purple-400 placeholder-gray-700"
+                                />
+                              ) : (
+                                <textarea
+                                  value={serviceProfile[key]}
+                                  onChange={e => updateProfile(key, e.target.value)}
+                                  placeholder={placeholder}
+                                  className="w-full bg-transparent border border-purple-500/20 text-white text-xs p-1.5 resize-none outline-none h-14 focus:border-purple-400 placeholder-gray-700"
+                                />
+                              )}
+                            </div>
+                          ))}
+
+                          <div>
+                            <div className="text-xs text-gray-500 mb-1">{'トーン'}</div>
+                            <div className="flex gap-2">
+                              {([
+                                { v: 'formal' as const, l: 'フォーマル' },
+                                { v: 'semi-formal' as const, l: 'やや柔らかめ' },
+                                { v: 'casual' as const, l: 'カジュアル' },
+                              ]).map(({ v, l }) => (
+                                <button key={v} onClick={() => updateProfile('tone', v)} className={'text-xs px-2 py-1 transition-colors ' + (serviceProfile.tone === v ? 'bg-purple-600 text-white' : 'border border-purple-500/20 text-gray-500 hover:text-purple-400')}>
+                                  {l}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* AI Actions */}
+                      <div className="flex gap-2 mt-3">
+                        <button
+                          onClick={generatePreview}
+                          disabled={aiGenerating || !serviceProfile.service_name}
+                          className="flex-1 py-1.5 text-xs font-bold bg-purple-600 text-white disabled:opacity-40 hover:bg-purple-500"
+                        >
+                          {aiGenerating ? '生成中...' : 'プレビュー生成'}
+                        </button>
+                        <button
+                          onClick={generateAll}
+                          disabled={aiGenerating || !serviceProfile.service_name}
+                          className="flex-1 py-1.5 text-xs font-bold border border-purple-500 text-purple-400 disabled:opacity-40 hover:bg-purple-500/10"
+                        >
+                          {aiGenerating ? `${aiProgress.done}/${aiProgress.total}` : `全${companyRecords.length}社生成`}
+                        </button>
+                      </div>
+
+                      {/* AI Stats */}
+                      {aiGenerated > 0 && (
+                        <div className="text-xs text-purple-400 mt-2">
+                          {'AI生成済: '}{aiGenerated}{'/'}{companyRecords.length}{'社'}
+                        </div>
+                      )}
+
+                      {/* AI Preview */}
+                      {aiPreview && (
+                        <div className="mt-3 border-t border-purple-500/20 pt-3">
+                          <div className="text-xs text-gray-500 mb-1">{'// プレビュー: '}{companyRecords[selectedCompanyIdx ?? 0]?.company}</div>
+                          <div className="text-xs text-white whitespace-pre-wrap bg-[#0a0a15] border border-[#1a1a2e] p-2 max-h-48 overflow-y-auto">
+                            {aiPreview}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <button onClick={createCampaign} disabled={loading || !campaignName} className="w-full py-2 mt-3 bg-[#00ff88] text-black font-bold text-xs disabled:opacity-40 hover:bg-[#00cc70]">
+                    {loading ? '作成中...' : `▶ キャンペーン作成 (${companyRecords.length}社${useAi && aiGenerated > 0 ? ` / AI ${aiGenerated}件` : ''})`}
                   </button>
                 </>
               )}
             </div>
+
+            {/* Right Panel: Company Preview */}
             <div className="flex-1 p-4 overflow-y-auto">
-              <div className="text-xs text-gray-600 mb-2">{'// プレビュー'}</div>
-              {companyRecords.slice(0, 50).map((r, i) => (
-                <div key={i} className="border-b border-[#1a1a2e] px-3 py-2 flex items-center gap-3 text-xs">
+              <div className="text-xs text-gray-600 mb-2">{'// プレビュー'}{useAi && aiGenerated > 0 ? ` (AI生成済: ${aiGenerated}社)` : ''}</div>
+              {companyRecords.slice(0, 100).map((r, i) => (
+                <div
+                  key={i}
+                  onClick={() => {
+                    setSelectedCompanyIdx(i)
+                    if (r.custom_message) setAiPreview(r.custom_message)
+                  }}
+                  className={'border-b border-[#1a1a2e] px-3 py-2 flex items-center gap-3 text-xs cursor-pointer transition-colors ' + (selectedCompanyIdx === i ? 'bg-purple-500/10' : 'hover:bg-[#1a1a2e]/50')}
+                >
                   <span className="text-gray-500 w-8">{i + 1}</span>
-                  <span className="text-white w-48 truncate">{r.company}</span>
+                  <span className="text-white w-44 truncate">{r.company}</span>
                   <span className={'flex-1 truncate ' + (r.form_url ? 'text-blue-400' : r.hp_url ? 'text-cyan-400' : 'text-gray-600')}>
                     {r.form_url || r.hp_url || '検索が必要'}
                   </span>
-                  <span className={'shrink-0 ' + (r.form_url ? 'text-blue-400' : r.hp_url ? 'text-cyan-400' : 'text-yellow-500')}>
+                  <span className={'shrink-0 w-6 ' + (r.form_url ? 'text-blue-400' : r.hp_url ? 'text-cyan-400' : 'text-yellow-500')}>
                     {r.form_url ? 'A' : r.hp_url ? 'B' : 'S'}
                   </span>
+                  {r.custom_message && (
+                    <span className="text-purple-400 shrink-0">{'AI'}</span>
+                  )}
                 </div>
               ))}
-              {companyRecords.length > 50 && <div className="text-xs text-gray-600 py-2 text-center">{'...他 '}{companyRecords.length - 50}{'社'}</div>}
+              {companyRecords.length > 100 && <div className="text-xs text-gray-600 py-2 text-center">{'...他 '}{companyRecords.length - 100}{'社'}</div>}
             </div>
           </div>
         )}
@@ -440,6 +658,7 @@ export default function Home() {
                   <span className={'text-xs shrink-0 ' + (t.search_source === 'direct_url' ? 'text-blue-400' : t.search_source === 'hp_url' ? 'text-cyan-400' : 'text-gray-600')}>
                     {t.search_mode === 'A' ? 'A' : t.search_mode === 'B' ? 'B' : t.search_source || ''}
                   </span>
+                  {t.custom_message && <span className="text-xs text-purple-400 shrink-0">{'AI'}</span>}
                   {t.send_status === 'success' && (
                     <span className="text-xs text-[#00ff88] shrink-0">{t.complete_detected ? '完了確認済' : '送信済'}</span>
                   )}

@@ -74,6 +74,7 @@ export async function POST(req: NextRequest) {
       hp_url: t.hp_url || null,
       hojin_number: t.hojin_number || null,
       address: t.address || null,
+      custom_message: t.custom_message || null,
     }))
 
     const { error } = await supabase.from('targets').insert(batch)

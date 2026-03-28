@@ -144,8 +144,20 @@ export type FilledField = {
   value?: string
 }
 
+// AI Message Generation
+export type ServiceProfile = {
+  service_name: string
+  service_description: string
+  target_pain_points: string
+  value_proposition: string
+  differentiators: string
+  case_study: string
+  desired_cta: string
+  tone: 'formal' | 'semi-formal' | 'casual'
+}
+
 // Convenience types
 export type Profile = Database['public']['Tables']['profiles']['Row']
 export type Campaign = Database['public']['Tables']['campaigns']['Row']
-export type Target = Database['public']['Tables']['targets']['Row']
+export type Target = Database['public']['Tables']['targets']['Row'] & { custom_message?: string | null }
 export type ExecutionLog = Database['public']['Tables']['execution_logs']['Row']
