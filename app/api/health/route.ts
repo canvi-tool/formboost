@@ -25,7 +25,7 @@ export async function GET() {
   const senderUrl = process.env.SENDER_URL
   if (senderUrl) {
     try {
-      const res = await fetch(senderUrl, { signal: AbortSignal.timeout(5000) })
+      const res = await fetch(`${senderUrl}/health`, { signal: AbortSignal.timeout(5000) })
       const data = await res.json()
       checks.cloud_run = { status: 'ok', version: data.version }
     } catch (e: unknown) {
