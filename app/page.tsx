@@ -369,6 +369,7 @@ export default function Home() {
           <span className="text-gray-600 text-xs">{'v3.0 — AIフォーム営業自動化'}</span>
         </div>
         <div className="flex items-center gap-3">
+          <a href="/agent" className="text-xs text-[#00ff88] hover:text-white border border-[#00ff88] px-3 py-1">{'🤖 AI Agent'}</a>
           <span className="text-xs text-gray-500">{auth.user.email}</span>
           <button onClick={() => supabase.auth.signOut()} className="text-xs text-gray-500 hover:text-white border border-[#1a1a2e] px-3 py-1">{'ログアウト'}</button>
         </div>
