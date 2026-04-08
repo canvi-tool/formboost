@@ -290,12 +290,20 @@ export default function AgentDashboard() {
   return (
     <div className="min-h-screen bg-black text-green-400 font-mono">
       {/* Header */}
-      <header className="border-b border-green-900 p-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold">🤖 FORMBOOST AI AGENT</h1>
-          <p className="text-xs text-gray-500">v4.0 — 自律型BtoB営業社員</p>
+      <header className="border-b border-green-900 p-4 flex items-center justify-between bg-gradient-to-r from-black via-green-950/30 to-black">
+        <div className="flex items-center gap-4">
+          <div className="text-4xl animate-pulse">🤖</div>
+          <div>
+            <h1 className="text-2xl font-bold tracking-wider">AI社畜くん</h1>
+            <p className="text-xs text-green-600 italic">「ぼくは寝なくて大丈夫です。今日もがんばります！」</p>
+            <p className="text-[10px] text-gray-600 mt-0.5">ステータス: 🟢 稼働中 / 疲労度: 0% / 有給残: ∞</p>
+          </div>
         </div>
-        <div className="flex gap-2 text-xs">
+        <div className="flex flex-col items-end gap-1 text-xs">
+          <div className="px-3 py-1 border border-green-700 bg-green-950/40">
+            <span className="text-green-400">もう、あなたが</span>
+            <span className="text-green-300 font-bold ml-1">社畜にならなくていい。</span>
+          </div>
           <a href="/" className="px-3 py-1 border border-green-700 hover:bg-green-900/30">← キャンペーン画面</a>
         </div>
       </header>
@@ -303,11 +311,11 @@ export default function AgentDashboard() {
       {/* Tabs */}
       <nav className="flex border-b border-green-900 text-sm">
         {[
-          { key: 'briefing', label: '☀️ 今日のブリーフィング' },
-          { key: 'service', label: '🎯 サービス設定' },
-          { key: 'companies', label: '🏢 企業マスタ' },
-          { key: 'slack', label: '💬 Slack連携' },
-          { key: 'history', label: '📊 履歴' },
+          { key: 'briefing', label: '🌙 今夜の営業プラン' },
+          { key: 'service', label: '🎯 売るサービス' },
+          { key: 'companies', label: '🏢 攻める企業' },
+          { key: 'slack', label: '💬 Slack出社先' },
+          { key: 'history', label: '📊 社畜の労働履歴' },
         ].map(t => (
           <button
             key={t.key}
@@ -537,6 +545,35 @@ function SlackSettings({
   const [botToken, setBotToken] = useState('')
   const [channelId, setChannelId] = useState('')
   const [channelName, setChannelName] = useState('')
+  const [channels, setChannels] = useState<{ id: string; name: string; is_private: boolean; is_member: boolean }[]>([])
+  const [search, setSearch] = useState('')
+  const [loadingChannels, setLoadingChannels] = useState(false)
+
+  const loadChannels = async () => {
+    if (!botToken) {
+      setMessage('❌ Bot Tokenを先に入力してください')
+      return
+    }
+    setLoadingChannels(true)
+    const res = await authFetch('/api/slack/channels', {
+      method: 'POST',
+      body: JSON.stringify({ bot_token: botToken }),
+    })
+    setLoadingChannels(false)
+    if (res?.ok) {
+      const data = await res.json()
+      setChannels(data.channels || [])
+      setMessage(`✅ ${data.channels?.length || 0}件のチャンネルを取得しました`)
+    } else {
+      const e = await res?.json()
+      setMessage(`❌ ${e?.error || 'チャンネル取得失敗'}`)
+    }
+  }
+
+  const selectChannel = (c: { id: string; name: string }) => {
+    setChannelId(c.id)
+    setChannelName(c.name)
+  }
 
   const save = async () => {
     const res = await authFetch('/api/slack/workspace', {
@@ -546,6 +583,7 @@ function SlackSettings({
     if (res?.ok) {
       setMessage('✅ Slack連携を設定しました')
       setBotToken('')
+      setChannels([])
       onSaved()
     } else {
       const e = await res?.json()
@@ -553,9 +591,14 @@ function SlackSettings({
     }
   }
 
+  const filteredChannels = channels.filter(c =>
+    !search || c.name.toLowerCase().includes(search.toLowerCase())
+  )
+
   return (
     <div className="border border-green-900 p-4 space-y-3 text-sm">
-      <h2 className="text-lg">💬 Slack連携設定</h2>
+      <h2 className="text-lg">💬 Slack連携設定 <span className="text-xs text-gray-500">— AI社畜くんの出社先</span></h2>
+      <p className="text-[11px] text-green-600 italic">「どのチャンネルに毎朝報告すればいいですか？ぼく、どこでも行きます！」</p>
       {connected ? (
         <div className="text-xs text-green-300">
           ✅ 接続済み: {connected.channel_name || connected.channel_id}
@@ -564,9 +607,38 @@ function SlackSettings({
         <div className="text-xs text-gray-500">未接続</div>
       )}
       <div className="space-y-3">
-        <Field label="Bot User OAuth Token (xoxb-...)"><input type="password" value={botToken} onChange={e => setBotToken(e.target.value)} className="w-full bg-black border border-green-900 px-2 py-1" /></Field>
-        <Field label="チャンネルID (C0123...)"><input value={channelId} onChange={e => setChannelId(e.target.value)} className="w-full bg-black border border-green-900 px-2 py-1" /></Field>
-        <Field label="チャンネル名 (表示用)"><input value={channelName} onChange={e => setChannelName(e.target.value)} className="w-full bg-black border border-green-900 px-2 py-1" /></Field>
+        <Field label="Bot User OAuth Token (xoxb-...)">
+          <div className="flex gap-2">
+            <input type="password" value={botToken} onChange={e => setBotToken(e.target.value)} className="flex-1 bg-black border border-green-900 px-2 py-1" />
+            <button onClick={loadChannels} disabled={!botToken || loadingChannels} className="px-3 py-1 bg-green-900 text-green-300 hover:bg-green-800 disabled:opacity-50 text-xs whitespace-nowrap">
+              {loadingChannels ? '取得中…' : '🔍 チャンネル取得'}
+            </button>
+          </div>
+        </Field>
+        {channels.length > 0 && (
+          <div className="border border-green-900 p-2 space-y-2">
+            <input
+              type="text"
+              placeholder="🔎 チャンネル名で検索..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="w-full bg-black border border-green-900 px-2 py-1 text-xs"
+            />
+            <div className="max-h-48 overflow-y-auto space-y-1">
+              {filteredChannels.map(c => (
+                <button
+                  key={c.id}
+                  onClick={() => selectChannel(c)}
+                  className={`w-full text-left px-2 py-1 text-xs hover:bg-green-900 ${channelId === c.id ? 'bg-green-800 text-black' : ''}`}
+                >
+                  {c.is_private ? '🔒' : '#'} {c.name} {c.is_member ? '' : <span className="text-yellow-500">（未参加）</span>}
+                </button>
+              ))}
+              {filteredChannels.length === 0 && <div className="text-xs text-gray-500">該当なし</div>}
+            </div>
+          </div>
+        )}
+        <Field label="選択中チャンネル"><input value={channelName ? `#${channelName} (${channelId})` : ''} readOnly className="w-full bg-black border border-green-900 px-2 py-1 text-gray-400" /></Field>
         <button onClick={save} disabled={!botToken || !channelId} className="px-4 py-2 bg-green-700 text-black hover:bg-green-600 disabled:opacity-50 text-xs">💾 保存・接続テスト</button>
         <div className="text-xs text-gray-500 border-t border-green-900 pt-3 mt-3">
           <p>📘 セットアップ手順:</p>
