@@ -288,46 +288,57 @@ export default function AgentDashboard() {
   if (loading) return <div className="p-8 text-gray-500">Loading...</div>
 
   return (
-    <div className="min-h-screen bg-black text-green-400 font-mono">
+    <div className="min-h-screen bg-slate-50 text-slate-800">
       {/* Header */}
-      <header className="border-b border-green-900 p-4 flex items-center justify-between bg-gradient-to-r from-black via-green-950/30 to-black">
-        <div className="flex items-center gap-4">
-          <div className="text-4xl animate-pulse">🤖</div>
-          <div>
-            <h1 className="text-2xl font-bold tracking-wider">AI社畜くん</h1>
-            <p className="text-xs text-green-600 italic">「ぼくは寝なくて大丈夫です。今日もがんばります！」</p>
-            <p className="text-[10px] text-gray-600 mt-0.5">ステータス: 🟢 稼働中 / 疲労度: 0% / 有給残: ∞</p>
+      <header className="bg-white border-b border-slate-200 shadow-sm">
+        <div className="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-slate-900 to-slate-700 flex items-center justify-center text-2xl shadow-md">
+              🤖
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-slate-900 tracking-tight">AI社畜くん</h1>
+              <p className="text-xs text-slate-500 mt-0.5">もう、あなたが社畜にならなくていい。</p>
+            </div>
           </div>
-        </div>
-        <div className="flex flex-col items-end gap-1 text-xs">
-          <div className="px-3 py-1 border border-green-700 bg-green-950/40">
-            <span className="text-green-400">もう、あなたが</span>
-            <span className="text-green-300 font-bold ml-1">社畜にならなくていい。</span>
+          <div className="flex items-center gap-3">
+            <div className="hidden sm:flex items-center gap-2 text-xs text-slate-500">
+              <span className="w-2 h-2 rounded-full bg-lime-500 animate-pulse"></span>
+              稼働中
+            </div>
+            <a href="/" className="text-xs px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100 transition">← キャンペーン</a>
           </div>
-          <a href="/" className="px-3 py-1 border border-green-700 hover:bg-green-900/30">← キャンペーン画面</a>
         </div>
       </header>
 
       {/* Tabs */}
-      <nav className="flex border-b border-green-900 text-sm">
-        {[
-          { key: 'briefing', label: '🌙 今夜の営業プラン' },
-          { key: 'service', label: '🎯 売るサービス' },
-          { key: 'companies', label: '🏢 攻める企業' },
-          { key: 'slack', label: '💬 Slack出社先' },
-          { key: 'history', label: '📊 社畜の労働履歴' },
-        ].map(t => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key as typeof tab)}
-            className={`px-4 py-3 ${tab === t.key ? 'border-b-2 border-green-400 text-green-300' : 'text-gray-500 hover:text-green-400'}`}
-          >{t.label}</button>
-        ))}
+      <nav className="bg-white border-b border-slate-200">
+        <div className="max-w-6xl mx-auto px-6 flex overflow-x-auto">
+          {[
+            { key: 'briefing', label: '🌙 今夜の営業プラン' },
+            { key: 'service', label: '🎯 売るサービス' },
+            { key: 'companies', label: '🏢 攻める企業' },
+            { key: 'slack', label: '💬 Slack連携' },
+            { key: 'history', label: '📊 労働履歴' },
+          ].map(t => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key as typeof tab)}
+              className={`px-4 py-3 text-sm whitespace-nowrap transition ${
+                tab === t.key
+                  ? 'border-b-2 border-lime-500 text-slate-900 font-medium'
+                  : 'border-b-2 border-transparent text-slate-500 hover:text-slate-900'
+              }`}
+            >{t.label}</button>
+          ))}
+        </div>
       </nav>
 
       {message && (
-        <div className="mx-4 mt-4 p-3 border border-yellow-700 bg-yellow-900/20 text-yellow-300 text-sm">
-          {message}
+        <div className="max-w-6xl mx-auto px-6 mt-4">
+          <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-sm">
+            {message}
+          </div>
         </div>
       )}
 
@@ -595,62 +606,138 @@ function SlackSettings({
     !search || c.name.toLowerCase().includes(search.toLowerCase())
   )
 
+  // URLクエリからOAuth結果を拾う
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('slack_connected')) {
+      setMessage('✅ Slackワークスペースと連携しました。チャンネルを選択してください。')
+      onSaved()
+      window.history.replaceState({}, '', window.location.pathname + '?tab=slack')
+    } else if (params.get('slack_error')) {
+      setMessage(`❌ Slack連携エラー: ${params.get('slack_error')}`)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // 接続済みの場合、自動でチャンネル一覧をロード
+  useEffect(() => {
+    if (connected && channels.length === 0 && !loadingChannels) {
+      // 接続済みならサーバー側のbot_tokenでチャンネル取得
+      ;(async () => {
+        setLoadingChannels(true)
+        const res = await authFetch('/api/slack/channels', { method: 'POST', body: JSON.stringify({}) })
+        setLoadingChannels(false)
+        if (res?.ok) {
+          const data = await res.json()
+          setChannels(data.channels || [])
+        }
+      })()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected])
+
+  const startOAuth = async () => {
+    const sb = createBrowserClient()
+    const { data: { user } } = await sb.auth.getUser()
+    if (!user) {
+      setMessage('❌ ログインが必要です')
+      return
+    }
+    window.location.href = `/api/slack/oauth/start?user_id=${user.id}`
+  }
+
   return (
-    <div className="border border-green-900 p-4 space-y-3 text-sm">
-      <h2 className="text-lg">💬 Slack連携設定 <span className="text-xs text-gray-500">— AI社畜くんの出社先</span></h2>
-      <p className="text-[11px] text-green-600 italic">「どのチャンネルに毎朝報告すればいいですか？ぼく、どこでも行きます！」</p>
-      {connected ? (
-        <div className="text-xs text-green-300">
-          ✅ 接続済み: {connected.channel_name || connected.channel_id}
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-5">
+      <div>
+        <h2 className="text-lg font-semibold text-slate-900">Slack連携</h2>
+        <p className="text-sm text-slate-500 mt-1">AI社畜くんが毎朝報告するSlackチャンネルを設定します</p>
+      </div>
+
+      {!connected ? (
+        <div className="flex flex-col items-center py-8 space-y-4 border-2 border-dashed border-slate-200 rounded-xl">
+          <div className="text-5xl">💬</div>
+          <div className="text-center">
+            <p className="text-sm font-medium text-slate-700">Slackワークスペースと連携</p>
+            <p className="text-xs text-slate-500 mt-1">ボタンを押してSlackにログイン→連携完了</p>
+          </div>
+          <button
+            onClick={startOAuth}
+            className="flex items-center gap-2 px-5 py-2.5 bg-[#4A154B] hover:bg-[#3b1139] text-white rounded-lg shadow-sm font-medium text-sm transition"
+          >
+            <svg width="18" height="18" viewBox="0 0 122.8 122.8" xmlns="http://www.w3.org/2000/svg">
+              <path d="M25.8,77.6c0,7.1-5.8,12.9-12.9,12.9S0,84.7,0,77.6s5.8-12.9,12.9-12.9h12.9V77.6z" fill="#E01E5A"/>
+              <path d="M32.3,77.6c0-7.1,5.8-12.9,12.9-12.9s12.9,5.8,12.9,12.9v32.3c0,7.1-5.8,12.9-12.9,12.9s-12.9-5.8-12.9-12.9V77.6z" fill="#E01E5A"/>
+              <path d="M45.2,25.8c-7.1,0-12.9-5.8-12.9-12.9S38.1,0,45.2,0s12.9,5.8,12.9,12.9v12.9H45.2z" fill="#36C5F0"/>
+              <path d="M45.2,32.3c7.1,0,12.9,5.8,12.9,12.9S52.3,58.1,45.2,58.1H12.9C5.8,58.1,0,52.3,0,45.2s5.8-12.9,12.9-12.9H45.2z" fill="#36C5F0"/>
+              <path d="M97,45.2c0-7.1,5.8-12.9,12.9-12.9s12.9,5.8,12.9,12.9s-5.8,12.9-12.9,12.9H97V45.2z" fill="#2EB67D"/>
+              <path d="M90.5,45.2c0,7.1-5.8,12.9-12.9,12.9s-12.9-5.8-12.9-12.9V12.9C64.7,5.8,70.5,0,77.6,0s12.9,5.8,12.9,12.9V45.2z" fill="#2EB67D"/>
+              <path d="M77.6,97c7.1,0,12.9,5.8,12.9,12.9s-5.8,12.9-12.9,12.9s-12.9-5.8-12.9-12.9V97H77.6z" fill="#ECB22E"/>
+              <path d="M77.6,90.5c-7.1,0-12.9-5.8-12.9-12.9s5.8-12.9,12.9-12.9h32.3c7.1,0,12.9,5.8,12.9,12.9s-5.8,12.9-12.9,12.9H77.6z" fill="#ECB22E"/>
+            </svg>
+            Slackと連携する
+          </button>
+          <p className="text-[11px] text-slate-400">クリックするとSlackの認証ページに移動します</p>
         </div>
       ) : (
-        <div className="text-xs text-gray-500">未接続</div>
-      )}
-      <div className="space-y-3">
-        <Field label="Bot User OAuth Token (xoxb-...)">
-          <div className="flex gap-2">
-            <input type="password" value={botToken} onChange={e => setBotToken(e.target.value)} className="flex-1 bg-black border border-green-900 px-2 py-1" />
-            <button onClick={loadChannels} disabled={!botToken || loadingChannels} className="px-3 py-1 bg-green-900 text-green-300 hover:bg-green-800 disabled:opacity-50 text-xs whitespace-nowrap">
-              {loadingChannels ? '取得中…' : '🔍 チャンネル取得'}
-            </button>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between p-4 bg-lime-50 border border-lime-200 rounded-xl">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-lime-500 flex items-center justify-center text-white text-lg">✓</div>
+              <div>
+                <div className="text-sm font-medium text-slate-900">Slackワークスペース連携済み</div>
+                <div className="text-xs text-slate-500">
+                  {connected.channel_name
+                    ? `通知先: #${connected.channel_name}`
+                    : 'チャンネル未選択 — 下から選んでください'}
+                </div>
+              </div>
+            </div>
           </div>
-        </Field>
-        {channels.length > 0 && (
-          <div className="border border-green-900 p-2 space-y-2">
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">通知チャンネルを選択</label>
             <input
               type="text"
               placeholder="🔎 チャンネル名で検索..."
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="w-full bg-black border border-green-900 px-2 py-1 text-xs"
+              className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-lime-500 focus:border-transparent"
             />
-            <div className="max-h-48 overflow-y-auto space-y-1">
-              {filteredChannels.map(c => (
-                <button
-                  key={c.id}
-                  onClick={() => selectChannel(c)}
-                  className={`w-full text-left px-2 py-1 text-xs hover:bg-green-900 ${channelId === c.id ? 'bg-green-800 text-black' : ''}`}
-                >
-                  {c.is_private ? '🔒' : '#'} {c.name} {c.is_member ? '' : <span className="text-yellow-500">（未参加）</span>}
-                </button>
-              ))}
-              {filteredChannels.length === 0 && <div className="text-xs text-gray-500">該当なし</div>}
-            </div>
+            {loadingChannels && <div className="text-xs text-slate-500 mt-2">チャンネル取得中…</div>}
+            {channels.length > 0 && (
+              <div className="mt-2 max-h-64 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
+                {filteredChannels.map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => selectChannel(c)}
+                    className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-50 transition flex items-center justify-between ${
+                      channelId === c.id ? 'bg-lime-50 text-slate-900' : 'text-slate-700'
+                    }`}
+                  >
+                    <span>
+                      <span className="text-slate-400 mr-1">{c.is_private ? '🔒' : '#'}</span>
+                      {c.name}
+                    </span>
+                    {!c.is_member && <span className="text-[10px] text-amber-600">未参加</span>}
+                    {channelId === c.id && <span className="text-lime-600 text-xs">✓ 選択中</span>}
+                  </button>
+                ))}
+                {filteredChannels.length === 0 && (
+                  <div className="px-3 py-4 text-sm text-slate-400 text-center">該当するチャンネルがありません</div>
+                )}
+              </div>
+            )}
           </div>
-        )}
-        <Field label="選択中チャンネル"><input value={channelName ? `#${channelName} (${channelId})` : ''} readOnly className="w-full bg-black border border-green-900 px-2 py-1 text-gray-400" /></Field>
-        <button onClick={save} disabled={!botToken || !channelId} className="px-4 py-2 bg-green-700 text-black hover:bg-green-600 disabled:opacity-50 text-xs">💾 保存・接続テスト</button>
-        <div className="text-xs text-gray-500 border-t border-green-900 pt-3 mt-3">
-          <p>📘 セットアップ手順:</p>
-          <ol className="list-decimal list-inside space-y-1 mt-1">
-            <li>api.slack.com/apps で新規App作成</li>
-            <li>OAuth &amp; Permissions で <code>chat:write</code> スコープ追加</li>
-            <li>Interactivity &amp; Shortcuts を有効化し、Request URLに <code>https://formboost.vercel.app/api/slack/interactions</code> を設定</li>
-            <li>Appをワークスペースにインストール → Bot User OAuth Tokenをコピー</li>
-            <li>通知したいチャンネルでAppを招待 → チャンネルIDを取得</li>
-          </ol>
+
+          <button
+            onClick={save}
+            disabled={!channelId}
+            className="w-full px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg disabled:opacity-40 disabled:cursor-not-allowed font-medium text-sm transition"
+          >
+            このチャンネルに決定
+          </button>
         </div>
-      </div>
+      )}
     </div>
   )
 }
